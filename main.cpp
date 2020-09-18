@@ -9,11 +9,12 @@ std::vector<int> data;
 
 DWORD WINAPI Client(LPVOID arg) {
     int id = (int)arg;
-    
+
     DWORD res = WaitForSingleObject(h, INFINITE);
     std::cout << id << " Client recived data " << data[0] << "\n";
 
     HANDLE e = OpenEventA(EVENT_MODIFY_STATE, true, "Server");
+
     if (e == INVALID_HANDLE_VALUE) return -1;
     SetEvent(e);
 
