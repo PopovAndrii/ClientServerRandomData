@@ -1,65 +1,73 @@
 #include <iostream>
 #include <windows.h>
 #include <vector>
+#include <string> 
 
-HANDLE h = INVALID_HANDLE_VALUE;
-HANDLE ping = INVALID_HANDLE_VALUE;
+HANDLE clientWaitSemaphore = INVALID_HANDLE_VALUE;
+HANDLE clientExit = INVALID_HANDLE_VALUE;
+HANDLE dataReady = INVALID_HANDLE_VALUE;
+HANDLE server = INVALID_HANDLE_VALUE;
+
+CRITICAL_SECTION c;
+LONG counter = 1;
 
 std::vector<int> data;
 
 DWORD WINAPI Client(LPVOID arg) {
-    int id = (int)arg;
+    int id = reinterpret_cast<int>(arg);
+    WaitForSingleObject(clientWaitSemaphore, INFINITE);
+    WaitForSingleObject(dataReady, INFINITE);
 
-    DWORD res = WaitForSingleObject(h, INFINITE);
-    std::cout << id << " Client recived data " << data[0] << "\n";
+    std::string str = std::to_string(id) + " Client recived hash: " + std::to_string(data[0]) + "\n";
+    std::cout << str;
 
-    HANDLE e = OpenEventA(EVENT_MODIFY_STATE, true, "Server");
-
-    if (e == INVALID_HANDLE_VALUE) return -1;
-    SetEvent(e);
-
+    SetEvent(clientExit);
     return 0;
 }
 
 DWORD WINAPI Server(LPVOID arg) {
+    int semaphore = reinterpret_cast<int>(arg);
     LONG prevVal = 0;
-
     data.push_back(0);
 
-    for (int i = 0; i < 6; ++i) {
-        Sleep(1000);
-        std::cout << "Server second data \n";
-        ReleaseSemaphore(h, 2, &prevVal);
+    for (;;) {
+        Sleep(300);
+        std::cout << "---- Server load ----\n";
+        ReleaseSemaphore(clientWaitSemaphore, semaphore, &prevVal);
     
-        //for (int j = 0; j < 2; ++j) {
-
-            DWORD res = WaitForSingleObject(ping, INFINITE);
-            data[0] = rand() % 10;
-            DWORD res1 = WaitForSingleObject(ping, INFINITE);
-            data[0] = rand() % 10 + 1;
-
-        //}
-        std::cout << "UnSleepServer\n";
+        for (int j = 0; j < semaphore; ++j) {
+            EnterCriticalSection(&c);
+            data[0] = rand() % 999999000000 + (++counter);
+            LeaveCriticalSection(&c);
+            SetEvent(dataReady);
+        }
+            WaitForSingleObject(clientExit, INFINITE);
     }
-
     return 0;
 }
 
-
 int main()
 {
+    dataReady = CreateEventA(0, FALSE, FALSE, NULL);
+    if (dataReady == INVALID_HANDLE_VALUE) return -1;
 
-    ping = CreateEventA(0, FALSE, FALSE, "Server");
-    if (ping == INVALID_HANDLE_VALUE) return -1;
+    clientExit = CreateEventA(0, FALSE, FALSE, NULL);
+    if (clientExit == INVALID_HANDLE_VALUE) return -1;
 
-    h = CreateSemaphore(0, 0, 10, L"ServerDataSync");
-    if (h == INVALID_HANDLE_VALUE) return -1;
+    clientWaitSemaphore = CreateSemaphore(0, 0, 10, L"ServerDataSync");
+    if (clientWaitSemaphore == INVALID_HANDLE_VALUE) return -1;
 
-    CreateThread(0, 0, Server, 0, 0, 0);
-    Sleep(2000);
-    for (int i = 0; i < 6; ++i) {
-        CreateThread(0, 0, Client, (LPVOID)i, 0, 0);
+    for (int i = 0; i < 200; ++i) {
+        HANDLE client = CreateThread(0, 0, Client, reinterpret_cast<LPVOID>(i), 0, 0);
+        if (client == INVALID_HANDLE_VALUE) return -1;
     }
 
-    Sleep(50000);
+    InitializeCriticalSection(&c);
+    server = CreateThread(0, 0, Server, reinterpret_cast<LPVOID>(5), 0, 0);
+    if (server == INVALID_HANDLE_VALUE) return -1;
+
+    Sleep(7000);
+    //WaitForMultipleObjects();
+    DeleteCriticalSection(&c);
+    return 0;
 }
