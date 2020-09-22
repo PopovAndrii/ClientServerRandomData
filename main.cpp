@@ -1,73 +1,90 @@
 #include <iostream>
-#include <windows.h>
 #include <vector>
-#include <string> 
+#include <memory>
+#include <map>
+#include <list>
+#include <Windows.h>
+#include <cstdlib>
+#include <set>
+#include <ctime>
+#include <random>
+#include <string>
+CRITICAL_SECTION CriticalSection;
+std::set<std::string> allRandoms;
+std::string RandomString()
+{
+    std::string str("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
 
-HANDLE clientWaitSemaphore = INVALID_HANDLE_VALUE;
-HANDLE clientExit = INVALID_HANDLE_VALUE;
-HANDLE dataReady = INVALID_HANDLE_VALUE;
-HANDLE server = INVALID_HANDLE_VALUE;
+    std::random_device rd;
+    std::mt19937 generator(rd());
 
-CRITICAL_SECTION c;
-LONG counter = 1;
+    std::shuffle(str.begin(), str.end(), generator);
 
-std::vector<int> data;
-
-DWORD WINAPI Client(LPVOID arg) {
-    int id = reinterpret_cast<int>(arg);
-    WaitForSingleObject(clientWaitSemaphore, INFINITE);
-    WaitForSingleObject(dataReady, INFINITE);
-
-    std::string str = std::to_string(id) + " Client recived hash: " + std::to_string(data[0]) + "\n";
-    std::cout << str;
-
-    SetEvent(clientExit);
-    return 0;
+    return str.substr(0, 128);
 }
 
-DWORD WINAPI Server(LPVOID arg) {
-    int semaphore = reinterpret_cast<int>(arg);
-    LONG prevVal = 0;
-    data.push_back(0);
+std::set<std::string> rands;
 
-    for (;;) {
-        Sleep(300);
-        std::cout << "---- Server load ----\n";
-        ReleaseSemaphore(clientWaitSemaphore, semaphore, &prevVal);
-    
-        for (int j = 0; j < semaphore; ++j) {
-            EnterCriticalSection(&c);
-            data[0] = rand() % 999999000000 + (++counter);
-            LeaveCriticalSection(&c);
-            SetEvent(dataReady);
-        }
-            WaitForSingleObject(clientExit, INFINITE);
+class RandomGenerator {
+public:
+    RandomGenerator()
+    {
+        m_semaphore = CreateSemaphore(0, m_maxRandoms, 1000, L"RandomGenerator");
+        m_randoms.resize(m_maxRandoms + 1);
+        GenerateRandoms();
     }
+    ~RandomGenerator() {
+        if (m_semaphore) {
+            CloseHandle(m_semaphore);
+        }
+    }
+    void GenerateRandoms() {
+        for (int i = 0; i < m_maxRandoms + 1; ++i) {
+            m_randoms[i] = RandomString();
+        }
+    }
+
+    std::string GetRandom() {
+        WaitForSingleObject(m_semaphore, INFINITE);
+        std::string rnd;
+        LONG curId = InterlockedIncrement(&m_curId);
+        if (curId == m_maxRandoms) {
+            GenerateRandoms();
+            m_curId = 0;
+            LONG prevCount = 0;
+            ReleaseSemaphore(m_semaphore, m_maxRandoms, &prevCount);
+        }
+        rnd = m_randoms[curId];
+
+        return rnd;
+    }
+
+private:
+    HANDLE m_semaphore = NULL;
+    std::vector<std::string> m_randoms;
+    LONG volatile m_curId = NULL;
+    const int m_maxRandoms = 100;
+};
+
+DWORD WINAPI ShowRandom(LPVOID param) {
+    RandomGenerator* rg = (RandomGenerator*)param;
+    std::string rnd = rg->GetRandom();
+    auto res = allRandoms.insert(rnd);
+    if (!res.second) {
+        std::cout << "duplicate";
+    }
+    std::cout << rnd << " " << std::endl;
     return 0;
 }
 
 int main()
 {
-    dataReady = CreateEventA(0, FALSE, FALSE, NULL);
-    if (dataReady == INVALID_HANDLE_VALUE) return -1;
+    InitializeCriticalSection(&CriticalSection);
+    RandomGenerator rg;
+    for (int i = 0; i < 10000; ++i) {
+        CreateThread(0, 0, ShowRandom, &rg, 0, 0);
 
-    clientExit = CreateEventA(0, FALSE, FALSE, NULL);
-    if (clientExit == INVALID_HANDLE_VALUE) return -1;
-
-    clientWaitSemaphore = CreateSemaphore(0, 0, 10, L"ServerDataSync");
-    if (clientWaitSemaphore == INVALID_HANDLE_VALUE) return -1;
-
-    for (int i = 0; i < 200; ++i) {
-        HANDLE client = CreateThread(0, 0, Client, reinterpret_cast<LPVOID>(i), 0, 0);
-        if (client == INVALID_HANDLE_VALUE) return -1;
     }
-
-    InitializeCriticalSection(&c);
-    server = CreateThread(0, 0, Server, reinterpret_cast<LPVOID>(5), 0, 0);
-    if (server == INVALID_HANDLE_VALUE) return -1;
-
-    Sleep(7000);
-    //WaitForMultipleObjects();
-    DeleteCriticalSection(&c);
+    Sleep(100000);
     return 0;
 }
