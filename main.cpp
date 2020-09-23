@@ -1,18 +1,14 @@
 #include <iostream>
-#include <vector>
-#include <memory>
-#include <map>
-#include <list>
+//#include <vector>
+//#include <map>
 #include <Windows.h>
-#include <cstdlib>
 #include <set>
-#include <ctime>
 #include <random>
-#include <string>
+
 CRITICAL_SECTION CriticalSection;
 std::set<std::string> allRandoms;
-std::string RandomString()
-{
+
+std::string RandomString(){
     std::string str("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz");
 
     std::random_device rd;
@@ -77,13 +73,11 @@ DWORD WINAPI ShowRandom(LPVOID param) {
     return 0;
 }
 
-int main()
-{
+int main(){
     InitializeCriticalSection(&CriticalSection);
     RandomGenerator rg;
     for (int i = 0; i < 10000; ++i) {
         CreateThread(0, 0, ShowRandom, &rg, 0, 0);
-
     }
     Sleep(100000);
     return 0;
